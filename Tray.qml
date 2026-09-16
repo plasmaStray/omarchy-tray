@@ -12,9 +12,8 @@ import "TrayModel.js" as TrayModel
 // status notifier icons, pin/hide, the slide-out drawer, in-popup app menus —
 // plus: any bar widget (clock, workspaces, weather, menu, panels, custom
 // modules...) can be dragged onto this tray and it moves inside the drawer.
-// Captured widgets keep their settings, clicks, tooltips, and panels; they can
-// be pinned (always visible) or restored to the bar from the right-click
-// manage popup.
+// Hosted widgets keep their settings, clicks, tooltips, and panels, and can
+// be restored to the bar where the shell still allows a drag.
 BarWidget {
   id: root
   moduleName: "io.github.tyrichards.tray"
@@ -42,6 +41,10 @@ BarWidget {
     && typeof root.bar.captureBarDragGhost === "function"
     && typeof root.bar.clearBarDrag === "function"
     && "barDragWindow" in root.bar
+  // Layout writes are tested together with the drag surface because both come
+  // from the "bar" capability: mutateShellConfig exists on every facade and
+  // returns false without it, so the function alone proves nothing. Every
+  // caller of this is a drag path, so the pair is the honest test.
   readonly property bool barConfigWritable: !!root.bar && !!root.bar.shell
     && typeof root.bar.shell.mutateShellConfig === "function"
     && root.barDragSupported
@@ -51,12 +54,12 @@ BarWidget {
   function resolveWidgetRegistry() {
     if (root.bar && root.bar.barWidgetRegistry) {
       root.widgetRegistry = root.bar.barWidgetRegistry
-      return
+    } else {
+      var shell = root.bar ? root.bar.shell : null
+      var service = shell && typeof shell.serviceFor === "function"
+        ? shell.serviceFor(root.moduleName) : null
+      root.widgetRegistry = service && service.barWidgetRegistry ? service.barWidgetRegistry : null
     }
-    var shell = root.bar ? root.bar.shell : null
-    var service = shell && typeof shell.serviceFor === "function"
-      ? shell.serviceFor(root.moduleName) : null
-    root.widgetRegistry = service && service.barWidgetRegistry ? service.barWidgetRegistry : null
     if (root.widgetRegistry !== null) {
       root.serviceAttempt = 0
       root.registryGaveUp = false
@@ -88,9 +91,11 @@ BarWidget {
       root.resolveWidgetRegistry()
       if (root.widgetRegistry === null && root.serviceAttempt >= 40 && !root.registryGaveUp) {
         root.registryGaveUp = true
-        console.warn("tray: no widget registry after 16s."
-          + " Captured widgets stay empty. The shell reached this widget but not"
-          + " the plugin's service entry point; restart the shell once.")
+        console.warn("tray: no widget registry after 16 seconds."
+          + " The drawer shows its icons but none of its hosted widgets."
+          + " Two known causes. The shell did not load the plugin's service"
+          + " entry point, which one shell restart fixes. Or a replacement bar"
+          + " is active, and it cannot hand a widget its own service.")
       }
     }
   }

@@ -66,13 +66,26 @@ If you replaced the stock tray, put it back with
 
 - **Hover the chevron** to slide the drawer open; tray icons and hosted
   widgets live inside it.
+- **Right-click the chevron** for the manage popup (Escape or click-away
+  closes it): a **SHOW SYSTEM ICONS** master toggle (on by default; the icon rows gray out while icons are
+  hidden), and one hoverable row per icon — click it to toggle that icon's
+  visibility; the eye glyph at the row's edge shows the current state.
+  Hosted widgets have no popup controls. Add and remove them in `shell.json`,
+  as shown below, or by drag where the shell allows it.
+- While another widget's panel is open, hovering the chevron does not open
+  the drawer (the panel's focus grab swallows hover anyway) — click the
+  chevron instead: the open panel closes and the drawer opens.
+- Hosted widgets keep their inline settings, clicks, tooltips, wheel
+  actions, and panels. Tray state (what the drawer holds, its order, hidden
+  icons) is stored on the tray's own `shell.json` entry, so it survives
+  restarts and is shared across monitors.
 
 ### Filling the drawer by hand
 
 On Omarchy 4 this is the only way, since the shell withholds the drag surface.
 Move a widget's layout entry from its bar section into the tray's `widgets`
-list, and add its plugin id to the top-level `plugins` array so the shell
-keeps loading it:
+list, and make sure its plugin id is in the top-level `plugins` array so the
+shell keeps loading it. Many ids are there already:
 
 ```json
 {
@@ -107,18 +120,6 @@ reloads `shell.json` on save.
 - **Drag the chevron to move the whole tray.** The chevron is the tray's only
   whole-widget drag handle; grabbing anything else in the tray never drags
   the tray itself.
-- **Right-click the chevron** for the manage popup (Escape or click-away
-  closes it): a **SHOW SYSTEM ICONS** master toggle (on by default; the icon rows gray out while icons are
-  hidden), and one hoverable row per icon — click it to toggle that icon's
-  visibility; the eye glyph at the row's edge shows the current state.
-  Widgets have no popup controls — dragging is the whole interface.
-- While another widget's panel is open, hovering the chevron does not open
-  the drawer (the panel's focus grab swallows hover anyway) — click the
-  chevron instead: the open panel closes and the drawer opens.
-- Captured widgets keep their inline settings, clicks, tooltips, wheel
-  actions, and panels. Tray state (what's captured, the drawer order, hidden
-  icons) is stored on the tray's own `shell.json` entry, so it survives
-  restarts and is shared across monitors.
 
 ## Vertical bars
 
