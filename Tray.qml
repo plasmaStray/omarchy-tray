@@ -32,6 +32,21 @@ BarWidget {
   // runs makes QML re-enter that binding and report a loop on the caller.
   property var widgetRegistry: null
   property int serviceAttempt: 0
+  property bool registryGaveUp: false
+
+  // The same facade also withholds the bar's drag surface and its config
+  // writer, so every drag path in this widget is dead on a sandboxed shell.
+  // Probe both once and let the drag handlers refuse early: reading a property
+  // the facade never declares returns undefined, and writing one throws.
+  readonly property bool barDragSupported: !!root.bar
+    && typeof root.bar.captureBarDragGhost === "function"
+    && typeof root.bar.clearBarDrag === "function"
+    && "barDragWindow" in root.bar
+  readonly property bool barConfigWritable: !!root.bar && !!root.bar.shell
+    && typeof root.bar.shell.mutateShellConfig === "function"
+    && root.barDragSupported
+
+  readonly property string homeDir: Quickshell.env("HOME")
 
   function resolveWidgetRegistry() {
     if (root.bar && root.bar.barWidgetRegistry) {
@@ -42,6 +57,10 @@ BarWidget {
     var service = shell && typeof shell.serviceFor === "function"
       ? shell.serviceFor(root.moduleName) : null
     root.widgetRegistry = service && service.barWidgetRegistry ? service.barWidgetRegistry : null
+    if (root.widgetRegistry !== null) {
+      root.serviceAttempt = 0
+      root.registryGaveUp = false
+    }
   }
 
   // The bar hands the facade a fresh layoutConfig object every time a widget
@@ -67,6 +86,12 @@ BarWidget {
     onTriggered: {
       root.serviceAttempt += 1
       root.resolveWidgetRegistry()
+      if (root.widgetRegistry === null && root.serviceAttempt >= 40 && !root.registryGaveUp) {
+        root.registryGaveUp = true
+        console.warn("tray: no widget registry after 16s."
+          + " Captured widgets stay empty. The shell reached this widget but not"
+          + " the plugin's service entry point; restart the shell once.")
+      }
     }
   }
 
@@ -81,8 +106,7 @@ BarWidget {
   function customModuleSource(entry) {
     if (root.bar && typeof root.bar.customModuleSource === "function")
       return root.bar.customModuleSource(entry)
-    var home = Quickshell.env("HOME")
-    var path = TrayModel.customModulePath(entry, home, home + "/.config/omarchy")
+    var path = TrayModel.customModulePath(entry, root.homeDir, root.homeDir + "/.config/omarchy")
     return path ? Util.fileUrl(path) : ""
   }
 
@@ -286,7 +310,7 @@ BarWidget {
   // there can return a stale false. Recomputing from the live properties is
   // always current.
   function dragEligible(slot) {
-    if (!slot || !root.bar) return false
+    if (!slot || !root.bar || !root.barDragSupported) return false
     if (String(slot.moduleName || "") === root.moduleName) return false
     var win = root.QsWindow ? root.QsWindow.window : null
     return !!win && root.bar.barDragWindow === win
@@ -350,11 +374,13 @@ BarWidget {
       if (!wanted) return
       var shellRef = root.bar ? root.bar.shell : null
       var trayId = root.moduleName || "io.github.tyrichards.tray"
-      if (!shellRef || typeof shellRef.mutateShellConfig !== "function") return
+      if (!root.barConfigWritable) return
       Qt.callLater(function() {
-        shellRef.mutateShellConfig(function(config) {
+        var written = shellRef.mutateShellConfig(function(config) {
           TrayModel.captureIntoTray(config, trayId, wanted, nextOrder)
         })
+        if (!written) console.warn("tray: the shell refused the layout write, so"
+          + " capturing " + wanted + " was not saved.")
       })
     }
 
@@ -551,8 +577,7 @@ BarWidget {
       // Order token to insert before when released over the tray ("" = end);
       // null while the pointer is off the tray or nothing can be reordered.
       property var orderBeforeKey: null
-      readonly property bool canReorder: root.bar && root.bar.shell
-        && typeof root.bar.shell.mutateShellConfig === "function"
+      readonly property bool canReorder: root.barConfigWritable
       readonly property real dragThreshold: Style.space(4)
 
       anchors.fill: parent
@@ -567,7 +592,7 @@ BarWidget {
         var b = root.bar
         var win = root.QsWindow ? root.QsWindow.window : null
         var delegate = dragDelegate || dragIconDelegate
-        if (!b || !win || !delegate) return false
+        if (!b || !win || !delegate || !root.barDragSupported) return false
         fakeDragSlot.moduleName = String(delegate.widgetId || delegate.itemId || "")
         fakeDragSlot.activeItem = delegate.activeItem || delegate
         b.barDragWindow = win
@@ -698,10 +723,12 @@ BarWidget {
         // rebuild the bar while this release handler is on the stack. The
         // closure holds only the shell reference and plain values.
         Qt.callLater(function() {
-          if (typeof shellRef.mutateShellConfig !== "function") return
-          shellRef.mutateShellConfig(function(config) {
+          if (!root.barConfigWritable) return
+          var written = shellRef.mutateShellConfig(function(config) {
             TrayModel.dragOutOfTray(config, trayId, widgetId, toRegion, beforeName)
           })
+          if (!written) console.warn("tray: the shell refused the layout write, so"
+            + " restoring " + widgetId + " to the bar was not saved.")
         })
       }
 

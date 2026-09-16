@@ -8,14 +8,13 @@ import QtQuick
 // catalogue. Tray.qml reads it back through bar.shell.serviceFor(<own id>)
 // and instantiates the captured widgets from it.
 //
-// It lives in its own directory on purpose. The QML type loader caches a
-// directory listing the first time it loads a file from it, and a file added
-// later to a cached directory fails to load with "File name case mismatch"
-// until the shell restarts. `omarchy plugin update` only rescans, so an
-// upgrade that added Service.qml next to Tray.qml would leave the drawer
-// empty until the next login. A new directory has no stale listing.
+// It lives in its own directory because the QML loader caches a directory
+// listing. A file added later to a directory the loader has already read
+// fails with "File name case mismatch" until the shell restarts, which is
+// what happened while this was a sibling of Tray.qml. A fresh directory has
+// no cached listing, so a new install loads it straight away. An upgrade in
+// place is not proven to, so the README asks for one shell restart.
 QtObject {
-  property var shell: null
-  property var manifest: null
+  // Injected by the shell. Nothing else here reads it; Tray.qml does.
   property var barWidgetRegistry: null
 }
