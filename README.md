@@ -103,6 +103,15 @@ transparent), so the two never fight for pixels or clicks.
 
 ## Notes and limitations
 
+- The tray declares a `service` entry point. The shell gives a third-party bar
+  widget no widget registry, and the service is the only place it still hands
+  over the widget catalogue the drawer needs. After you update to this version,
+  restart the shell once with `omarchy-restart-shell`: `omarchy plugin update`
+  only rescans, and the QML loader will not pick up a file added to a directory
+  it has already read.
+- Two kinds of captured widget stay inert. One that reads its own service
+  through `bar.shell.serviceFor` gets nothing, because only the built-in bar
+  can mint that. One that reads `bar.shell.pluginRegistry` gets nothing either.
 - Panel hotkeys (`omarchy-shell` summon/toggle for e.g. the weather panel)
   only find widgets sitting directly in the bar layout; a widget captured into
   the tray still opens its panel by click, but not by hotkey. Restore it to

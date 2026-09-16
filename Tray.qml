@@ -19,6 +19,73 @@ BarWidget {
   id: root
   moduleName: "io.github.tyrichards.tray"
 
+  // The Omarchy 4 shell hands a third-party bar widget a PluginBarApi facade
+  // instead of the real Bar, and that facade carries no widget registry. So
+  // captured widgets can no longer be instantiated from bar.barWidgetRegistry
+  // and the drawer renders empty. The shell still injects the widget catalogue
+  // into a plugin's service entry point, and a widget may look up its own
+  // plugin's service, so the registry comes back through service/Service.qml.
+  // A real Bar object (older shells, first-party bars) still wins.
+  //
+  // This resolves outside every binding on purpose: serviceFor() builds the
+  // scoped facade on its first call, and creating a QObject while a binding
+  // runs makes QML re-enter that binding and report a loop on the caller.
+  property var widgetRegistry: null
+  property int serviceAttempt: 0
+
+  function resolveWidgetRegistry() {
+    if (root.bar && root.bar.barWidgetRegistry) {
+      root.widgetRegistry = root.bar.barWidgetRegistry
+      return
+    }
+    var shell = root.bar ? root.bar.shell : null
+    var service = shell && typeof shell.serviceFor === "function"
+      ? shell.serviceFor(root.moduleName) : null
+    root.widgetRegistry = service && service.barWidgetRegistry ? service.barWidgetRegistry : null
+  }
+
+  // The bar hands the facade a fresh layoutConfig object every time a widget
+  // registers a click target, and the hosted widgets register theirs as they
+  // load. Depending on that identity puts the drawer in a binding loop, so
+  // track the serialised form and republish only on a real content change.
+  property var stableLayoutConfig: null
+  readonly property string layoutConfigKey: root.bar && root.bar.layoutConfig
+    ? JSON.stringify(root.bar.layoutConfig) : ""
+  onLayoutConfigKeyChanged: root.stableLayoutConfig = root.bar ? root.bar.layoutConfig : null
+
+  onBarChanged: root.resolveWidgetRegistry()
+  Component.onCompleted: {
+    root.stableLayoutConfig = root.bar ? root.bar.layoutConfig : null
+    root.resolveWidgetRegistry()
+  }
+
+  // The service can register after the widget, so retry for a bounded while.
+  Timer {
+    interval: 400
+    repeat: true
+    running: root.widgetRegistry === null && root.serviceAttempt < 40
+    onTriggered: {
+      root.serviceAttempt += 1
+      root.resolveWidgetRegistry()
+    }
+  }
+
+  // The facade has no customModuleType/customModuleSource either; fall back
+  // to the same resolution the bar applies (TrayModel mirrors BarModel).
+  function customModuleType(entry) {
+    if (root.bar && typeof root.bar.customModuleType === "function")
+      return String(root.bar.customModuleType(entry) || "")
+    return TrayModel.customModuleType(entry)
+  }
+
+  function customModuleSource(entry) {
+    if (root.bar && typeof root.bar.customModuleSource === "function")
+      return root.bar.customModuleSource(entry)
+    var home = Quickshell.env("HOME")
+    var path = TrayModel.customModulePath(entry, home, home + "/.config/omarchy")
+    return path ? Util.fileUrl(path) : ""
+  }
+
   // Hover-to-expand, driven by the drag-out overlay's single HoverHandler:
   // two stacked hover items (the overlay plus a handler in the drawer) fight
   // over hover and oscillate the reveal, so the overlay is the one authority.
@@ -799,8 +866,7 @@ BarWidget {
   }
 
   function ownedByOmarchy(item) {
-    var layout = root.bar && root.bar.layoutConfig ? root.bar.layoutConfig : null
-    return TrayModel.ownedByOmarchy(item, layout)
+    return TrayModel.ownedByOmarchy(item, root.stableLayoutConfig)
   }
 
   function bucket(category) {
@@ -1635,11 +1701,10 @@ BarWidget {
     readonly property var entry: modelData && modelData.entry ? modelData.entry : ({})
     readonly property string widgetId: TrayModel.entryId(entry)
     readonly property var widgetSettings: TrayModel.entrySettings(entry)
-    readonly property string customType: root.bar && typeof root.bar.customModuleType === "function"
-      ? String(root.bar.customModuleType(entry) || "") : ""
+    readonly property string customType: root.customModuleType(entry)
     readonly property var registryComponent: {
       if (customType) return null
-      var registry = root.bar ? root.bar.barWidgetRegistry : null
+      var registry = root.widgetRegistry
       if (!registry) return null
       var revision = registry.revision
       var record = registry.widgets[widgetId]
@@ -1690,8 +1755,7 @@ BarWidget {
     Loader {
       id: qmlLoader
       active: hostedRoot.customType === "qml"
-      source: active && root.bar && typeof root.bar.customModuleSource === "function"
-        ? root.bar.customModuleSource(hostedRoot.entry) : ""
+      source: active ? root.customModuleSource(hostedRoot.entry) : ""
       anchors.fill: parent
       onLoaded: {
         hostedRoot.injectProps()
