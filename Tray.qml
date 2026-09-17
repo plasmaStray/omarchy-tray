@@ -1228,7 +1228,7 @@ BarWidget {
 
         Repeater {
           model: root.pinnedItems
-          delegate: TrayItem {}
+          delegate: PinnedTrayEntry {}
         }
       }
     }
@@ -1312,7 +1312,7 @@ BarWidget {
 
         Repeater {
           model: root.pinnedItems
-          delegate: TrayItem {}
+          delegate: PinnedTrayEntry {}
         }
       }
     }
@@ -1328,6 +1328,15 @@ BarWidget {
 
     sourceComponent: modelData && modelData.kind === "widget" ? hostedWidgetComponent : trayItemComponent
     onLoaded: item.modelData = drawerEntry.modelData.data
+  }
+
+  component PinnedTrayEntry: Loader {
+    id: pinnedEntry
+
+    required property var modelData
+
+    sourceComponent: trayItemComponent
+    onLoaded: item.modelData = pinnedEntry.modelData
   }
 
   Component { id: hostedWidgetComponent; HostedWidget {} }
