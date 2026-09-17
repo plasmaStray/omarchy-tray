@@ -81,12 +81,34 @@ If you replaced the stock tray, put it back with
   icons) is stored on the tray's own `shell.json` entry, so it survives
   restarts and is shared across monitors.
 
-### Filling the drawer by hand
+### Move a widget into or out of the drawer
 
-On Omarchy 4 this is the only way, since the shell withholds the drag surface.
-Move a widget's layout entry from its bar section into the tray's `widgets`
-list, and make sure its plugin id is in the top-level `plugins` array so the
-shell keeps loading it. Many ids are there already:
+On Omarchy 4, use the installed bridge because the shell withholds the drag
+surface. Replace `WIDGET_ID` with the widget's id from `shell.json`:
+
+```bash
+TRAY_BRIDGE="$HOME/.config/omarchy/plugins/io.github.tyrichards.tray/tools/tray-config-bridge.sh"
+
+# Move a bar widget into the end of the drawer.
+bash "$TRAY_BRIDGE" capture io.github.tyrichards.tray WIDGET_ID ""
+
+# Move it back to the end of the bar's right section.
+bash "$TRAY_BRIDGE" restore io.github.tyrichards.tray WIDGET_ID right ""
+```
+
+For example, the ids used by hyprmoncfg and KeePass Picker are
+`crmne.hyprmoncfg` and `mkelk.keepass-picker`. The config hot-reloads after
+each command. If QML from a newly installed or upgraded plugin is still
+cached, run `omarchy-restart-shell` once.
+
+For agents: inspect `~/.config/omarchy/shell.json`, run exactly one `capture`
+or `restore`, then read the file again. A capture is complete only when the
+widget is absent from every `bar.layout` section and appears in the tray
+entry's `widgets` and `order` arrays. A restore is complete only when the
+inverse is true. Preserve the widget entry verbatim; the bridge does this for
+you.
+
+The resulting tray entry has this shape:
 
 ```json
 {
@@ -98,9 +120,8 @@ shell keeps loading it. Many ids are there already:
 }
 ```
 
-`entry` is the widget's own layout entry, settings and all, so copy it
-verbatim. `order` interleaves hosted widgets and tray icons by id. The shell
-reloads `shell.json` on save.
+`entry` is the widget's own layout entry, settings and all. `order` interleaves
+hosted widgets and tray icons by id.
 
 ### With drag, where the shell allows it
 
