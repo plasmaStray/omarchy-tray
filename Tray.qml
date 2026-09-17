@@ -541,8 +541,10 @@ BarWidget {
 
   function dropIsPinned(point) {
     var axis = root.vertical ? point.y : point.x
-    var pinnedExtent = pinnedItems.length * root.trayItemExtent
-    return pinnedExtent > 0 && axis >= root.width - pinnedExtent
+    var totalExtent = root.vertical ? root.height : root.width
+    var hasProvisionalSlot = dragOutMouse.localDragMode && dragOutMouse.dragIconDelegate !== null
+    return TrayModel.pinnedDropHit(axis, totalExtent, pinnedItems.length,
+      root.trayItemExtent, hasProvisionalSlot)
   }
 
   function hostedDelegateAt(rootX, rootY) {
@@ -802,26 +804,24 @@ BarWidget {
         if (reorder !== null && reorder !== undefined) {
           var keys = root.visibleTrayEntries.map(function(entry) { return entry.key })
           var nextOrder = TrayModel.movedBefore(keys, widgetId, String(reorder))
-          if (nextOrder) {
-            var nextPinned = root.pinnedIds.slice()
-            if (wasIconDrag) {
-              var pinnedIndex = nextPinned.indexOf(widgetId)
-              if (dropPinned && pinnedIndex === -1) nextPinned.push(widgetId)
-              if (!dropPinned && pinnedIndex !== -1) nextPinned.splice(pinnedIndex, 1)
-            }
+          var nextPinned = wasIconDrag
+            ? TrayModel.changedMembership(root.pinnedIds, widgetId, dropPinned)
+            : null
+          if (nextOrder || nextPinned) {
+            var stateChange = ({})
+            if (nextOrder) stateChange.order = nextOrder
+            if (nextPinned) stateChange.pinned = nextPinned
             Qt.callLater(function() {
-              root.persistState({ order: nextOrder, pinned: nextPinned })
+              root.persistState(stateChange)
             })
           }
           return
         }
 
         if (localDrag && wasIconDrag && dropOverTray) {
-          var nextPinnedOnly = root.pinnedIds.slice()
-          var pinnedOnlyIndex = nextPinnedOnly.indexOf(widgetId)
-          if (dropPinned && pinnedOnlyIndex === -1) nextPinnedOnly.push(widgetId)
-          if (!dropPinned && pinnedOnlyIndex !== -1) nextPinnedOnly.splice(pinnedOnlyIndex, 1)
-          Qt.callLater(function() { root.persistState({ pinned: nextPinnedOnly }) })
+          var nextPinnedOnly = TrayModel.changedMembership(root.pinnedIds, widgetId, dropPinned)
+          if (nextPinnedOnly)
+            Qt.callLater(function() { root.persistState({ pinned: nextPinnedOnly }) })
           return
         }
 

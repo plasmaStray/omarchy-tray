@@ -297,6 +297,31 @@ function movedBefore(order, id, beforeId) {
   return ids
 }
 
+// Add or remove an id without coupling membership to a separate ordering
+// change. Returns null when the requested membership is already in effect.
+function changedMembership(values, id, present) {
+  var ids = asList(values).map(String)
+  var value = String(id)
+  var index = ids.indexOf(value)
+  if (present) {
+    if (index !== -1) return null
+    ids.push(value)
+  } else {
+    if (index === -1) return null
+    ids.splice(index, 1)
+  }
+  return ids
+}
+
+// Return whether an axis coordinate falls inside the pinned end of the tray.
+// During a local icon drag the layout reserves one provisional slot, which is
+// the only way to pin an icon when the real pinned list is currently empty.
+function pinnedDropHit(axis, totalExtent, pinnedCount, slotExtent, provisional) {
+  var count = Math.max(0, Number(pinnedCount) || 0)
+  var extent = count * slotExtent + (provisional ? slotExtent : 0)
+  return extent > 0 && axis >= totalExtent - extent && axis <= totalExtent
+}
+
 if (typeof module !== "undefined") {
   module.exports = {
     asList: asList,
@@ -315,6 +340,8 @@ if (typeof module !== "undefined") {
     captureIntoTray: captureIntoTray,
     dragOutOfTray: dragOutOfTray,
     sortByOrder: sortByOrder,
-    movedBefore: movedBefore
+    movedBefore: movedBefore,
+    changedMembership: changedMembership,
+    pinnedDropHit: pinnedDropHit
   }
 }
