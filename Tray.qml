@@ -109,6 +109,12 @@ BarWidget {
     root.resolveWidgetRegistry()
   }
 
+  readonly property string traySettingsKey: JSON.stringify(settings || ({}))
+  readonly property var traySettings: {
+    try { return JSON.parse(traySettingsKey) }
+    catch (e) { return ({}) }
+  }
+
   // The service can register after the widget, so retry for a bounded while.
   Timer {
     interval: 400
@@ -165,16 +171,17 @@ BarWidget {
   property var activeTrayAnchor: null
   readonly property color foreground: bar ? bar.foreground : Color.foreground
   readonly property string fontFamily: bar ? bar.fontFamily : Style.font.family
-  readonly property var hiddenIds: TrayModel.asList(settings.hidden).map(String)
-  readonly property var pinnedIds: TrayModel.asList(settings.pinned).map(String)
+  readonly property var hiddenIds: TrayModel.asList(traySettings.hidden).map(String)
+  readonly property var pinnedIds: TrayModel.asList(traySettings.pinned).map(String)
   // Master switch for status-notifier icons: off removes them all from the
   // drawer (they stay listed in the manage popup for when it comes back on).
-  readonly property bool showTrayIcons: settings.showTrayIcons !== false
+  readonly property bool showTrayIcons: traySettings.showTrayIcons !== false
   // One user-arranged order across BOTH kinds of drawer content: hosted
   // widget ids and status-notifier item ids share the token list, so icons
   // and plugin widgets interleave freely. Missing tokens keep arrival order
   // after the arranged ones.
-  readonly property var orderIds: TrayModel.asList(settings.order).map(String)
+  readonly property var orderIds: TrayModel.asList(traySettings.order).map(String)
+  readonly property var systemTrayItems: SystemTray.items.values
   readonly property var allItems: bucket("all")
   readonly property var drawerItems: categoryItems("drawer")
   readonly property var pinnedItems: categoryItems("pinned")
@@ -183,7 +190,7 @@ BarWidget {
 
   // Bar widgets captured into the drawer. Stored on this widget's own
   // shell.json entry so they survive restarts and sync across monitors.
-  readonly property var hostedWrappers: TrayModel.normalizeWrappers(settings.widgets)
+  readonly property var hostedWrappers: TrayModel.normalizeWrappers(traySettings.widgets)
 
   // The drawer's single mixed model: hosted widgets and tray icons in one
   // ordered sequence.
@@ -1010,7 +1017,7 @@ BarWidget {
   }
 
   function bucket(category) {
-    var values = SystemTray.items.values
+    var values = systemTrayItems
     var result = []
     for (var i = 0; i < values.length; i++) {
       var item = values[i]
@@ -1092,7 +1099,9 @@ BarWidget {
   // there is always a drop target to aim at.
   visible: hasDrawerContent || pinnedItems.length > 0 || hostedWrappers.length > 0 || dragActive
 
-  onSettingsChanged: Qt.callLater(root.reconcileHostedWithLayout)
+  onSettingsChanged: {
+    Qt.callLater(root.reconcileHostedWithLayout)
+  }
 
   // When the manage popup is open, the bar underlines the whole tray — from
   // the chevron's left edge to the last icon — instead of its default 55%

@@ -94,6 +94,14 @@ function asList(value) {
     for (var i = 0; i < value.length; i++) out.push(value[i])
     return out
   }
+  // QML can expose a JSON array as a QJSValue proxy without Array.isArray,
+  // methods, or a length property. It still has a stable JSON representation.
+  try {
+    var parsed = JSON.parse(JSON.stringify(value))
+    if (Array.isArray(parsed)) return parsed
+  } catch (e) {
+    // A malformed or non-serialisable value is simply treated as empty.
+  }
   return []
 }
 
