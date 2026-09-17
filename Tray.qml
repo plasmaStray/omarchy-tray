@@ -175,9 +175,9 @@ BarWidget {
   // and plugin widgets interleave freely. Missing tokens keep arrival order
   // after the arranged ones.
   readonly property var orderIds: TrayModel.asList(settings.order).map(String)
-  readonly property var drawerItems: bucket("drawer")
-  readonly property var pinnedItems: bucket("pinned")
   readonly property var allItems: bucket("all")
+  readonly property var drawerItems: categoryItems("drawer")
+  readonly property var pinnedItems: categoryItems("pinned")
   readonly property int drawerCount: drawerItems.length
   readonly property int trayItemExtent: Style.bar.iconSlot
 
@@ -199,10 +199,12 @@ BarWidget {
   }
   readonly property var visibleTrayEntries: {
     var entries = []
-    for (var i = 0; i < drawerItems.length; i++)
-      entries.push({ kind: "icon", key: String(drawerItems[i].id || ""), data: drawerItems[i] })
-    for (var j = 0; j < pinnedItems.length; j++)
-      entries.push({ kind: "icon", key: String(pinnedItems[j].id || ""), data: pinnedItems[j] })
+    for (var i = 0; i < hostedWrappers.length; i++)
+      entries.push({ kind: "widget", key: TrayModel.wrapperId(hostedWrappers[i]), data: hostedWrappers[i] })
+    for (var j = 0; j < drawerItems.length; j++)
+      entries.push({ kind: "icon", key: String(drawerItems[j].id || ""), data: drawerItems[j] })
+    for (var k = 0; k < pinnedItems.length; k++)
+      entries.push({ kind: "icon", key: String(pinnedItems[k].id || ""), data: pinnedItems[k] })
     return TrayModel.sortByOrder(entries, orderIds)
   }
   readonly property bool hasDrawerContent: drawerEntries.length > 0
@@ -633,6 +635,7 @@ BarWidget {
       property var dragIconDelegate: null
       property bool localDragMode: false
       property bool localDropPinned: false
+      property bool localDropOverTray: false
       // Order token to insert before when released over the tray ("" = end);
       // null while the pointer is off the tray or nothing can be reordered.
       property var orderBeforeKey: null
@@ -678,6 +681,7 @@ BarWidget {
           var localScene = dragOutMouse.mapToItem(null, mouse.x, mouse.y)
           var localOverTray = localPoint.x >= 0 && localPoint.x <= root.width
             && localPoint.y >= 0 && localPoint.y <= root.height
+          localDropOverTray = localOverTray
           localDropPinned = localOverTray && root.dropIsPinned(localPoint)
           var localPick = localOverTray
             ? root.drawerReorderPick(localScene, dragDelegate || dragIconDelegate) : null
@@ -765,7 +769,9 @@ BarWidget {
         var widgetId = fakeDragSlot.moduleName
         var reorder = orderBeforeKey
         var dropPinned = localDropPinned
+        var dropOverTray = localDropOverTray
         localDropPinned = false
+        localDropOverTray = false
         orderBeforeKey = null
         var wasIconDrag = dragIconDelegate !== null
         dragIconDelegate = null
@@ -803,6 +809,15 @@ BarWidget {
           return
         }
 
+        if (localDrag && wasIconDrag && dropOverTray) {
+          var nextPinnedOnly = root.pinnedIds.slice()
+          var pinnedOnlyIndex = nextPinnedOnly.indexOf(widgetId)
+          if (dropPinned && pinnedOnlyIndex === -1) nextPinnedOnly.push(widgetId)
+          if (!dropPinned && pinnedOnlyIndex !== -1) nextPinnedOnly.splice(pinnedOnlyIndex, 1)
+          Qt.callLater(function() { root.persistState({ pinned: nextPinnedOnly }) })
+          return
+        }
+
         // Icon drags never leave the tray: outside it the release is a no-op.
         if (wasIconDrag) return
 
@@ -829,6 +844,9 @@ BarWidget {
         dragging = false
         suppressClick = false
         orderBeforeKey = null
+        localDragMode = false
+        localDropPinned = false
+        localDropOverTray = false
         dragIconDelegate = null
         if (root.bar && root.bar.barDragSource === fakeDragSlot) root.bar.clearBarDrag()
         fakeDragSlot.activeItem = null
@@ -998,12 +1016,17 @@ BarWidget {
       var item = values[i]
       if (item.status === Status.Passive) continue
       if (ownedByOmarchy(item)) continue
-      if (category === "all") {
-        result.push(item)
-        continue
-      }
-      if (!showTrayIcons) continue
-      if (classifyItem(item) === category) result.push(item)
+      result.push(item)
+    }
+    return TrayModel.sortByOrder(result, orderIds)
+  }
+
+  function categoryItems(category) {
+    if (!showTrayIcons) return []
+    var result = []
+    var values = allItems
+    for (var i = 0; i < values.length; i++) {
+      if (classifyItem(values[i]) === category) result.push(values[i])
     }
     return TrayModel.sortByOrder(result, orderIds)
   }
