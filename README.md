@@ -68,8 +68,9 @@ If you replaced the stock tray, put it back with
   widgets live inside it.
 - **Right-click the chevron** for the manage popup (Escape or click-away
   closes it): a **SHOW SYSTEM ICONS** master toggle (on by default; the icon rows gray out while icons are
-  hidden), and one hoverable row per icon — click it to toggle that icon's
-  visibility; the eye glyph at the row's edge shows the current state.
+  hidden), and one row per icon with independent **Pin / Unpin** and
+  **Hide / Show** actions. Pinning reveals a hidden icon; hiding unpins it, so
+  every icon is always in exactly one state: drawer, pinned, or hidden.
   Hosted widgets have no popup controls. Add and remove them in `shell.json`,
   as shown below, or by drag where the shell allows it.
 - While another widget's panel is open, hovering the chevron does not open

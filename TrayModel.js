@@ -313,6 +313,18 @@ function changedMembership(values, id, present) {
   return ids
 }
 
+// System tray icons have one placement at a time: in the drawer, pinned
+// outside it, or completely hidden. Keep that invariant in one place so UI
+// actions cannot accidentally leave the same id both pinned and hidden.
+function setIconPlacement(pinned, hidden, id, placement) {
+  var value = String(id)
+  var nextPinned = asList(pinned).map(String).filter(function(entry) { return entry !== value })
+  var nextHidden = asList(hidden).map(String).filter(function(entry) { return entry !== value })
+  if (placement === "pinned") nextPinned.push(value)
+  else if (placement === "hidden") nextHidden.push(value)
+  return { pinned: nextPinned, hidden: nextHidden }
+}
+
 // Return whether an axis coordinate falls inside the pinned end of the tray.
 // During a local icon drag the layout reserves one provisional slot, which is
 // the only way to pin an icon when the real pinned list is currently empty.
@@ -342,6 +354,7 @@ if (typeof module !== "undefined") {
     sortByOrder: sortByOrder,
     movedBefore: movedBefore,
     changedMembership: changedMembership,
+    setIconPlacement: setIconPlacement,
     pinnedDropHit: pinnedDropHit
   }
 }

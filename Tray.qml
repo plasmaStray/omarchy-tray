@@ -1087,12 +1087,14 @@ BarWidget {
     root.bar.shell.updateEntryInline(id, payload)
   }
 
+  function togglePin(iid) {
+    var placement = pinnedIds.indexOf(iid) !== -1 ? "drawer" : "pinned"
+    persistState(TrayModel.setIconPlacement(pinnedIds, hiddenIds, iid, placement))
+  }
+
   function toggleHide(iid) {
-    var h = hiddenIds.slice()
-    var idx = h.indexOf(iid)
-    if (idx !== -1) h.splice(idx, 1)
-    else h.push(iid)
-    persistState({ hidden: h })
+    var placement = hiddenIds.indexOf(iid) !== -1 ? "drawer" : "hidden"
+    persistState(TrayModel.setIconPlacement(pinnedIds, hiddenIds, iid, placement))
   }
 
   // Stay on screen while a drag is in flight even when otherwise empty, so
@@ -1395,7 +1397,7 @@ BarWidget {
       PanelHero {
         width: manageColumn.width
         title: "Tray"
-        meta: "Hide & reorder bar icons"
+        meta: "Pin, hide & reorder icons"
         foreground: root.foreground
         fontFamily: root.fontFamily
         iconComponent: Component {
@@ -1457,22 +1459,15 @@ BarWidget {
 
         Repeater {
           model: root.allItems
-        // Built like the wifi panel's network rows: a CursorSurface that
-        // lights up as one hoverable button, icon at the far left, title,
-        // and a status glyph in a fixed slot at the far right. Clicking
-        // anywhere on the row toggles the icon's hidden state.
-        delegate: CursorSurface {
+        delegate: Item {
           id: rowRoot
           required property var modelData
           required property int index
           width: manageColumn.width
           implicitHeight: rowBody.implicitHeight
-          hasCursor: iconRowMouse.containsMouse && root.showTrayIcons
-          foreground: root.foreground
-          // Grayed out while the master switch hides them all (inert too) or
-          // while this icon is individually hidden (still clickable, so it
-          // can be brought back).
-          opacity: !root.showTrayIcons || isHidden ? 0.4 : 1.0
+          // The master switch makes every row inert. Individually hidden
+          // icons stay actionable so Show can bring them back.
+          opacity: !root.showTrayIcons ? 0.4 : 1.0
           enabled: root.showTrayIcons
 
           readonly property string itemId: String(modelData.id || "")
@@ -1485,16 +1480,8 @@ BarWidget {
             var slash = id.lastIndexOf("/")
             return slash !== -1 ? id.substring(slash + 1) : (id || "Unknown")
           }
+          readonly property bool isPinned: root.pinnedIds.indexOf(itemId) !== -1
           readonly property bool isHidden: root.hiddenIds.indexOf(itemId) !== -1
-
-          MouseArea {
-            id: iconRowMouse
-            anchors.fill: parent
-            hoverEnabled: true
-            acceptedButtons: Qt.LeftButton
-            cursorShape: enabled ? Qt.PointingHandCursor : Qt.ArrowCursor
-            onClicked: root.toggleHide(rowRoot.itemId)
-          }
 
           Item {
             id: rowBody
@@ -1503,7 +1490,8 @@ BarWidget {
             anchors.top: parent.top
             anchors.leftMargin: Style.space(10)
             anchors.rightMargin: Style.space(10)
-            implicitHeight: Math.max(rowIcon.height, rowTitle.implicitHeight, rightGlyph.implicitHeight) + Style.spacing.rowPaddingX
+            implicitHeight: Math.max(rowIcon.height, rowTitle.implicitHeight, rowActions.implicitHeight)
+              + Style.spacing.rowPaddingX
 
             TrayIcon {
               id: rowIcon
@@ -1518,7 +1506,7 @@ BarWidget {
               id: rowTitle
               anchors.left: rowIcon.right
               anchors.leftMargin: Style.space(10)
-              anchors.right: rightGlyph.left
+              anchors.right: rowActions.left
               anchors.rightMargin: Style.space(8)
               anchors.verticalCenter: parent.verticalCenter
               text: rowRoot.displayName
@@ -1529,22 +1517,33 @@ BarWidget {
               elide: Text.ElideRight
             }
 
-            Item {
-              id: rightGlyph
-              width: Style.space(22)
-              implicitHeight: rightGlyphText.implicitHeight
+            Row {
+              id: rowActions
               anchors.right: parent.right
               anchors.verticalCenter: parent.verticalCenter
+              spacing: Style.space(6)
 
-              Text {
-                id: rightGlyphText
-                width: parent.width
-                anchors.verticalCenter: parent.verticalCenter
-                horizontalAlignment: Text.AlignHCenter
-                text: rowRoot.isHidden ? managePopup.iconHiddenGlyph : managePopup.iconVisibleGlyph
-                color: Qt.darker(root.foreground, 1.4)
-                font.family: root.fontFamily
-                font.pixelSize: Style.font.subtitle
+              Button {
+                iconText: rowRoot.isHidden ? managePopup.iconHiddenGlyph : managePopup.iconVisibleGlyph
+                text: rowRoot.isHidden ? "Show" : "Hide"
+                foreground: root.foreground
+                horizontalPadding: Style.space(6)
+                verticalPadding: Style.space(3)
+                iconSize: Style.font.bodySmall
+                fontSize: Style.font.bodySmall
+                onClicked: root.toggleHide(rowRoot.itemId)
+              }
+
+              Button {
+                iconText: "\uf08d"
+                text: rowRoot.isPinned ? "Unpin" : "Pin"
+                selected: rowRoot.isPinned
+                foreground: root.foreground
+                horizontalPadding: Style.space(6)
+                verticalPadding: Style.space(3)
+                iconSize: Style.font.bodySmall
+                fontSize: Style.font.bodySmall
+                onClicked: root.togglePin(rowRoot.itemId)
               }
             }
           }

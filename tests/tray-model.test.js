@@ -24,4 +24,20 @@ assert.deepEqual(
 )
 assert.equal(TrayModel.changedMembership(["TelegramDesktop"], "TelegramDesktop", true), null)
 
+// The management UI exposes three mutually-exclusive placements. Pinning a
+// hidden icon must reveal it; hiding a pinned icon must unpin it; either
+// action can be toggled back to the drawer.
+assert.deepEqual(
+  TrayModel.setIconPlacement([], ["TelegramDesktop"], "TelegramDesktop", "pinned"),
+  { pinned: ["TelegramDesktop"], hidden: [] }
+)
+assert.deepEqual(
+  TrayModel.setIconPlacement(["TelegramDesktop"], [], "TelegramDesktop", "hidden"),
+  { pinned: [], hidden: ["TelegramDesktop"] }
+)
+assert.deepEqual(
+  TrayModel.setIconPlacement(["TelegramDesktop"], [], "TelegramDesktop", "drawer"),
+  { pinned: [], hidden: [] }
+)
+
 console.log("tray model tests passed")
