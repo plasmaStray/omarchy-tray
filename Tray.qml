@@ -48,8 +48,36 @@ BarWidget {
   readonly property bool barConfigWritable: !!root.bar && !!root.bar.shell
     && typeof root.bar.shell.mutateShellConfig === "function"
     && root.barDragSupported
+  readonly property bool trayStateWritable: !!root.bar && !!root.bar.shell
+    && typeof root.bar.shell.updateEntryInline === "function"
 
   readonly property string homeDir: Quickshell.env("HOME")
+  readonly property string configBridgePath: root.homeDir
+    + "/.config/omarchy/plugins/io.github.tyrichards.tray/tools/tray-config-bridge.sh"
+  property string bridgeAction: ""
+  property var bridgeArguments: []
+
+  function runConfigBridge(action, args) {
+    if (configBridgeProc.running) {
+      console.warn("tray: config bridge is busy; dropping requested move")
+      return false
+    }
+    bridgeAction = String(action || "")
+    bridgeArguments = (args || []).map(function(value) { return String(value) })
+    configBridgeProc.running = true
+    return true
+  }
+
+  Process {
+    id: configBridgeProc
+    command: ["bash", root.configBridgePath, root.bridgeAction].concat(root.bridgeArguments)
+    onExited: function(exitCode) {
+      if (exitCode !== 0)
+        console.warn("tray: config bridge failed with exit code", exitCode, root.bridgeAction)
+      root.bridgeAction = ""
+      root.bridgeArguments = []
+    }
+  }
 
   function resolveWidgetRegistry() {
     if (root.bar && root.bar.barWidgetRegistry) {
@@ -138,6 +166,7 @@ BarWidget {
   readonly property color foreground: bar ? bar.foreground : Color.foreground
   readonly property string fontFamily: bar ? bar.fontFamily : Style.font.family
   readonly property var hiddenIds: TrayModel.asList(settings.hidden).map(String)
+  readonly property var pinnedIds: TrayModel.asList(settings.pinned).map(String)
   // Master switch for status-notifier icons: off removes them all from the
   // drawer (they stay listed in the manage popup for when it comes back on).
   readonly property bool showTrayIcons: settings.showTrayIcons !== false
@@ -147,6 +176,7 @@ BarWidget {
   // after the arranged ones.
   readonly property var orderIds: TrayModel.asList(settings.order).map(String)
   readonly property var drawerItems: bucket("drawer")
+  readonly property var pinnedItems: bucket("pinned")
   readonly property var allItems: bucket("all")
   readonly property int drawerCount: drawerItems.length
   readonly property int trayItemExtent: Style.bar.iconSlot
@@ -165,6 +195,14 @@ BarWidget {
     for (var j = 0; j < drawerItems.length; j++) {
       entries.push({ kind: "icon", key: String(drawerItems[j].id || ""), data: drawerItems[j] })
     }
+    return TrayModel.sortByOrder(entries, orderIds)
+  }
+  readonly property var visibleTrayEntries: {
+    var entries = []
+    for (var i = 0; i < drawerItems.length; i++)
+      entries.push({ kind: "icon", key: String(drawerItems[i].id || ""), data: drawerItems[i] })
+    for (var j = 0; j < pinnedItems.length; j++)
+      entries.push({ kind: "icon", key: String(pinnedItems[j].id || ""), data: pinnedItems[j] })
     return TrayModel.sortByOrder(entries, orderIds)
   }
   readonly property bool hasDrawerContent: drawerEntries.length > 0
@@ -383,13 +421,17 @@ BarWidget {
       if (!wanted) return
       var shellRef = root.bar ? root.bar.shell : null
       var trayId = root.moduleName || "io.github.tyrichards.tray"
-      if (!root.barConfigWritable) return
       Qt.callLater(function() {
-        var written = shellRef.mutateShellConfig(function(config) {
-          TrayModel.captureIntoTray(config, trayId, wanted, nextOrder)
-        })
-        if (!written) console.warn("tray: the shell refused the layout write, so"
-          + " capturing " + wanted + " was not saved.")
+        if (root.barConfigWritable) {
+          var written = shellRef.mutateShellConfig(function(config) {
+            TrayModel.captureIntoTray(config, trayId, wanted, nextOrder)
+          })
+          if (!written) console.warn("tray: the shell refused the layout write, so"
+            + " capturing " + wanted + " was not saved.")
+        } else {
+          root.runConfigBridge("capture", [trayId, wanted,
+            root.dragInPick ? String(root.dragInPick.beforeKey || "") : ""])
+        }
       })
     }
 
@@ -473,7 +515,7 @@ BarWidget {
     if (!bestDelegate) return null
 
     var draggedKey = dragged ? String(dragged.widgetId || dragged.itemId || "") : ""
-    var keys = drawerEntries.map(function(entry) { return entry.key })
+    var keys = visibleTrayEntries.map(function(entry) { return entry.key })
     var targetIndex = keys.indexOf(String(bestDelegate.widgetId || bestDelegate.itemId || ""))
     if (targetIndex === -1) return null
     var beforeKey
@@ -486,6 +528,12 @@ BarWidget {
       }
     }
     return { delegate: bestDelegate, after: bestAfter, beforeKey: beforeKey }
+  }
+
+  function dropIsPinned(point) {
+    var axis = root.vertical ? point.y : point.x
+    var pinnedExtent = pinnedItems.length * root.trayItemExtent
+    return pinnedExtent > 0 && axis >= root.width - pinnedExtent
   }
 
   function hostedDelegateAt(rootX, rootY) {
@@ -583,10 +631,12 @@ BarWidget {
       // A status-notifier icon being dragged. Icons reorder within the tray
       // only; releasing outside the tray is a deliberate no-op.
       property var dragIconDelegate: null
+      property bool localDragMode: false
+      property bool localDropPinned: false
       // Order token to insert before when released over the tray ("" = end);
       // null while the pointer is off the tray or nothing can be reordered.
       property var orderBeforeKey: null
-      readonly property bool canReorder: root.barConfigWritable
+      readonly property bool canReorder: root.trayStateWritable
       readonly property real dragThreshold: Style.space(4)
 
       anchors.fill: parent
@@ -601,8 +651,14 @@ BarWidget {
         var b = root.bar
         var win = root.QsWindow ? root.QsWindow.window : null
         var delegate = dragDelegate || dragIconDelegate
-        if (!b || !win || !delegate || !root.barDragSupported) return false
+        if (!b || !win || !delegate) return false
         fakeDragSlot.moduleName = String(delegate.widgetId || delegate.itemId || "")
+        if (!root.barDragSupported) {
+          localDragMode = true
+          root.clickExpanded = true
+          return true
+        }
+        localDragMode = false
         fakeDragSlot.activeItem = delegate.activeItem || delegate
         b.barDragWindow = win
         b.barDragScreen = win.screen
@@ -617,6 +673,17 @@ BarWidget {
       function updateDragOut(mouse) {
         var b = root.bar
         if (!b) return
+        if (localDragMode) {
+          var localPoint = dragOutMouse.mapToItem(root, mouse.x, mouse.y)
+          var localScene = dragOutMouse.mapToItem(null, mouse.x, mouse.y)
+          var localOverTray = localPoint.x >= 0 && localPoint.x <= root.width
+            && localPoint.y >= 0 && localPoint.y <= root.height
+          localDropPinned = localOverTray && root.dropIsPinned(localPoint)
+          var localPick = localOverTray
+            ? root.drawerReorderPick(localScene, dragDelegate || dragIconDelegate) : null
+          orderBeforeKey = localPick ? localPick.beforeKey : null
+          return
+        }
         var scenePoint = dragOutMouse.mapToItem(null, mouse.x, mouse.y)
         var screenPoint = b.barDragScreenPoint(scenePoint)
         b.barDragSceneX = scenePoint.x
@@ -691,10 +758,14 @@ BarWidget {
 
         suppressClick = true
         var b = root.bar
+        var localDrag = localDragMode
+        localDragMode = false
         var target = b ? b.barDragTarget : null
         var after = b ? b.barDragAfter : false
         var widgetId = fakeDragSlot.moduleName
         var reorder = orderBeforeKey
+        var dropPinned = localDropPinned
+        localDropPinned = false
         orderBeforeKey = null
         var wasIconDrag = dragIconDelegate !== null
         dragIconDelegate = null
@@ -705,7 +776,7 @@ BarWidget {
             ? String(b.nextVisibleModuleName(target.region, target.moduleName, fakeDragSlot) || "")
             : String(target.moduleName || "")
         }
-        if (b) b.clearBarDrag()
+        if (b && !localDrag) b.clearBarDrag()
         fakeDragSlot.activeItem = null
         fakeDragSlot.moduleName = ""
         mouse.accepted = true
@@ -716,9 +787,19 @@ BarWidget {
         // icons alike). A settings-only write, so no bar rebuild occurs;
         // deferring just keeps the release handler off the write path.
         if (reorder !== null && reorder !== undefined) {
-          var keys = root.drawerEntries.map(function(entry) { return entry.key })
+          var keys = root.visibleTrayEntries.map(function(entry) { return entry.key })
           var nextOrder = TrayModel.movedBefore(keys, widgetId, String(reorder))
-          if (nextOrder) Qt.callLater(function() { root.persistState({ order: nextOrder }) })
+          if (nextOrder) {
+            var nextPinned = root.pinnedIds.slice()
+            if (wasIconDrag) {
+              var pinnedIndex = nextPinned.indexOf(widgetId)
+              if (dropPinned && pinnedIndex === -1) nextPinned.push(widgetId)
+              if (!dropPinned && pinnedIndex !== -1) nextPinned.splice(pinnedIndex, 1)
+            }
+            Qt.callLater(function() {
+              root.persistState({ order: nextOrder, pinned: nextPinned })
+            })
+          }
           return
         }
 
@@ -732,12 +813,15 @@ BarWidget {
         // rebuild the bar while this release handler is on the stack. The
         // closure holds only the shell reference and plain values.
         Qt.callLater(function() {
-          if (!root.barConfigWritable) return
-          var written = shellRef.mutateShellConfig(function(config) {
-            TrayModel.dragOutOfTray(config, trayId, widgetId, toRegion, beforeName)
-          })
-          if (!written) console.warn("tray: the shell refused the layout write, so"
-            + " restoring " + widgetId + " to the bar was not saved.")
+          if (root.barConfigWritable) {
+            var written = shellRef.mutateShellConfig(function(config) {
+              TrayModel.dragOutOfTray(config, trayId, widgetId, toRegion, beforeName)
+            })
+            if (!written) console.warn("tray: the shell refused the layout write, so"
+              + " restoring " + widgetId + " to the bar was not saved.")
+          } else {
+            root.runConfigBridge("restore", [trayId, widgetId, toRegion, beforeName])
+          }
         })
       }
 
@@ -898,7 +982,9 @@ BarWidget {
 
   function classifyItem(item) {
     var iid = String(item.id || "")
-    return hiddenIds.indexOf(iid) !== -1 ? "hidden" : "drawer"
+    if (hiddenIds.indexOf(iid) !== -1) return "hidden"
+    if (pinnedIds.indexOf(iid) !== -1) return "pinned"
+    return "drawer"
   }
 
   function ownedByOmarchy(item) {
@@ -963,7 +1049,7 @@ BarWidget {
     var payload = { id: id }
     var current = root.settings || {}
     for (var key in current) {
-      if (key === "id" || key === "pinned" || key === "pinnedWidgets" || key === "iconOrder") continue
+      if (key === "id" || key === "pinnedWidgets" || key === "iconOrder") continue
       payload[key] = current[key]
     }
     payload.hidden = root.hiddenIds
@@ -981,7 +1067,7 @@ BarWidget {
 
   // Stay on screen while a drag is in flight even when otherwise empty, so
   // there is always a drop target to aim at.
-  visible: hasDrawerContent || hostedWrappers.length > 0 || dragActive
+  visible: hasDrawerContent || pinnedItems.length > 0 || hostedWrappers.length > 0 || dragActive
 
   onSettingsChanged: Qt.callLater(root.reconcileHostedWithLayout)
 
@@ -1040,8 +1126,10 @@ BarWidget {
       readonly property real revealExtent: drawerExtent * root.revealProgress
       readonly property bool showDrawerBlock: root.hasDrawerContent || root.dragActive
       readonly property real drawerBlockWidth: showDrawerBlock ? expandIcon.implicitWidth + revealExtent : 0
+      readonly property real pinnedWidth: pinnedRow.implicitWidth
+        + (dragOutMouse.localDragMode && dragOutMouse.dragIconDelegate ? root.trayItemExtent : 0)
 
-      implicitWidth: drawerBlockWidth
+      implicitWidth: drawerBlockWidth + pinnedWidth
       implicitHeight: root.barSize
 
       Binding {
@@ -1099,6 +1187,18 @@ BarWidget {
           }
         }
       }
+
+      Row {
+        id: pinnedRow
+        x: horizontalTrayRoot.drawerBlockWidth
+        anchors.verticalCenter: parent.verticalCenter
+        spacing: 0
+
+        Repeater {
+          model: root.pinnedItems
+          delegate: TrayItem {}
+        }
+      }
     }
   }
 
@@ -1112,9 +1212,11 @@ BarWidget {
       readonly property real revealExtent: drawerExtent * root.revealProgress
       readonly property bool showDrawerBlock: root.hasDrawerContent || root.dragActive
       readonly property real drawerBlockHeight: showDrawerBlock ? expandIcon.implicitHeight + revealExtent : 0
+      readonly property real pinnedHeight: pinnedColumn.implicitHeight
+        + (dragOutMouse.localDragMode && dragOutMouse.dragIconDelegate ? root.trayItemExtent : 0)
 
       implicitWidth: root.barSize
-      implicitHeight: drawerBlockHeight
+      implicitHeight: drawerBlockHeight + pinnedHeight
 
       Binding {
         target: root
@@ -1167,6 +1269,18 @@ BarWidget {
               delegate: DrawerEntry {}
             }
           }
+        }
+      }
+
+      Column {
+        id: pinnedColumn
+        y: verticalTrayRoot.drawerBlockHeight
+        anchors.horizontalCenter: parent.horizontalCenter
+        spacing: 0
+
+        Repeater {
+          model: root.pinnedItems
+          delegate: TrayItem {}
         }
       }
     }
