@@ -1801,12 +1801,33 @@ BarWidget {
     onActiveItemChanged: Qt.callLater(injectProps)
     onWidgetSettingsChanged: injectProps()
 
+    // Hosted widgets are laid out to the left of the chevron while the drawer
+    // is closed. Their pixels are clipped, but the bar's global click-target
+    // list does not account for ancestor clipping. A hidden hosted button can
+    // therefore overlap the preceding bar slot during hit-testing. Disable
+    // its interaction until the drawer reveals it; keep the item mounted so
+    // its implicit size still defines the drawer extent.
+    function syncHostedInteraction() {
+      var target = activeItem
+      if (!target) return
+      var enabled = root.revealProgress > 0 || root.ownPopoutActive
+      if ("interactive" in target) target.interactive = enabled
+      if ("pressable" in target) target.pressable = enabled
+    }
+
+    Connections {
+      target: root
+      function onRevealProgressChanged() { hostedRoot.syncHostedInteraction() }
+      function onOwnPopoutActiveChanged() { hostedRoot.syncHostedInteraction() }
+    }
+
     function injectProps() {
       var target = activeItem
       if (!target) return
       if ("bar" in target) target.bar = root.bar
       if ("moduleName" in target) target.moduleName = widgetId
       if ("settings" in target) target.settings = widgetSettings
+      syncHostedInteraction()
     }
 
     Loader {
